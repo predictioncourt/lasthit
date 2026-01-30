@@ -118,7 +118,7 @@
     <canvas id="game"></canvas>
     
     <div class="ui-layer">
-        <div id="score-display">SCORE: 0 | LEVEL: 1</div>
+        <div id="score-display">SCORE: 0</div>
     </div>
     
     <div id="start-screen" class="overlay active">
@@ -160,7 +160,7 @@ const IDEAL_MAX = 25;
 let state = {
     isPlaying: false,
     score: 0,
-    level: 1,
+    // level: 1, // kaldırıldı
     lastTime: 0,
     minions: [], // Array of minion objects
     particles: []
@@ -178,8 +178,7 @@ class Minion {
         
         // Decay speed based on level
         const baseSpeed = 15;
-        const difficulty = state.level * 2;
-        this.decaySpeed = baseSpeed + difficulty + rand(-5, 5);
+        this.decaySpeed = baseSpeed + rand(-5, 5); // Level etkisi kaldırıldı
         
         // Random start HP slightly varies
         this.hp = MAX_HP - rand(0, 20); 
@@ -301,7 +300,7 @@ function rand(min, max) {
 // ================= GAME LOGIC =================
 function startGame() {
     state.score = 0;
-    state.level = 1;
+    // state.level = 1; // kaldırıldı
     state.particles = [];
     state.minions = [];
     
@@ -340,7 +339,7 @@ function spawnNewMinions() {
 }
 
 function updateUI() {
-    document.getElementById('score-display').innerText = `SCORE: ${state.score} | LEVEL: ${state.level}`;
+    document.getElementById('score-display').innerText = `SCORE: ${state.score}`;
 }
 
 function gameOver() {
@@ -443,13 +442,10 @@ canvas.addEventListener("mousedown", (e) => {
     // Check all minions
     for (let m of state.minions) {
         const result = m.checkHit(mx, my);
-        
         if (result === "HIT") {
             // Success
             m.dead = true;
-            state.score += 10 + (state.level * 2);
-            state.level++; 
-            
+            state.score += 10;
             createParticles(m.x, m.y, "#00ff88"); // Green/Success particles
             updateUI();
             hitSomething = true;
