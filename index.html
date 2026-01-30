@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Last Hit Trainer</title>
+<style>
+    body {
+        margin: 0;
+        background: #000;
+        overflow: hidden;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: #eee;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    #game-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+    }
+
+    canvas {
+        display: block;
+        background: #000;
+    }
+
+    .ui-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 10;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+    }
+
+    .overlay.active {
+        opacity: 1;
+        pointer-events: all;
+    }
+
+    h1 {
+        font-size: 48px;
+        margin-bottom: 10px;
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 4px;
+        font-weight: 900;
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    }
+
+    p {
+        font-size: 18px;
+        color: #aaa;
+        margin-bottom: 30px;
+    }
+
+    .btn {
+        padding: 15px 40px;
+        font-size: 20px;
+        background: linear-gradient(45deg, #ff5555, #ff0000);
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.1s, box-shadow 0.2s;
+        text-transform: uppercase;
+        font-weight: 900;
+        letter-spacing: 2px;
+        border-radius: 5px;
+        box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+    }
+
+    .btn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 0 25px rgba(255, 0, 0, 0.8);
+    }
+
+    .btn:active {
+        transform: scale(0.95);
+    }
+
+    #score-display {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        font-size: 24px;
+        font-weight: bold;
+        color: #ccc;
+        pointer-events: none;
+        text-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+</style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="game"></canvas>
+    
+    <div class="ui-layer">
+        <div id="score-display">SCORE: 0 | LEVEL: 1</div>
+    </div>
+    
+    <div id="start-screen" class="overlay active">
+        <h1>LAST HIT</h1>
+        <p>Minion farming simulator. Right Click to Last Hit.</p>
+        <button class="btn" onclick="startGame()">START</button>
+    </div>
+
+    <div id="game-over-screen" class="overlay">
+        <h1 style="color: #ff5555">FAILED</h1>
+        <p id="final-score">Score: 0</p>
+        <button class="btn" onclick="startGame()">RETRY</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// Fullscreen canvas logic
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Prevent context menu
+canvas.addEventListener('contextmenu', event => {
+    event.preventDefault();
+});
+
+// ================= CONFIG =================
+const MAX_HP = 100;
+const IDEAL_MIN = 10;
+const IDEAL_MAX = 25; 
+
+// ================= STATE =================
+let state = {
+    isPlaying: false,
+    score: 0,
+    level: 1,
+    lastTime: 0,
+    minions: [], // Array of minion objects
+    particles: []
+};
+
+// ================= MINION CLASS =================
+class Minion {
+    constructor() {
+        // Random position but keep away from edges
+        const margin = 100;
+        this.x = rand(margin, canvas.width - margin);
+        this.y = rand(margin + 100, canvas.height - margin); // Lower area
+        this.r = 45;
+        this.hp = MAX_HP;
+        
+        // Decay speed based on level
+        const baseSpeed = 15;
+        const difficulty = state.level * 2;
+        this.decaySpeed = baseSpeed + difficulty + rand(-5, 5);
+        
+        // Random start HP slightly varies
+        this.hp = MAX_HP - rand(0, 20); 
+        
+        this.id = Math.random().toString(36).substr(2, 9);
+        this.dead = false;
+        this.color = "#ff5555"; // Default red
+    }
+
+    update(delta) {
+        if (this.dead) return;
+
+        this.hp -= this.decaySpeed * delta;
+        
+        if (this.hp <= 0) {
+            this.hp = 0;
+            this.dead = true;
+            // Missed a minion
+            gameOver();
+        }
+    }
+
+    draw(ctx) {
+        if (this.dead) return;
+
+        const pulse = Math.sin(performance.now() / 300) * 2;
+
+        // Draw Target Body
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r + pulse, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        
+        // Nice shadow glow
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Inner decorative ring
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r - 10, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // HP Bar
+        this.drawHP(ctx);
+    }
+
+    drawHP(ctx) {
+        const w = 160;
+        const h = 12;
+        const x = this.x - w / 2;
+        const y = this.y - this.r - 30;
+
+        // Background
+        ctx.fillStyle = "#333";
+        ctx.fillRect(x, y, w, h);
+
+        // Calculate Color based on HP
+        // Red = Wait, Green = Last Hit, Dark/Grey = Missed/Too Late
+        let barColor = "#ff5555";
+        if (this.hp <= IDEAL_MAX && this.hp >= IDEAL_MIN) {
+            barColor = "#00ff88"; // Ready to hit!
+        } else if (this.hp < IDEAL_MIN) {
+            barColor = "#555"; // Too late
+        }
+
+        // Draw Fill
+        const hpPercent = this.hp / MAX_HP;
+        ctx.fillStyle = barColor;
+        ctx.fillRect(x, y, w * hpPercent, h);
+
+        // Draw Markers for Ideal Range
+        const minX = x + w * (IDEAL_MIN / MAX_HP);
+        const maxX = x + w * (IDEAL_MAX / MAX_HP);
+
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 1;
+
+        // Min Line
+        ctx.beginPath();
+        ctx.moveTo(minX, y - 3);
+        ctx.lineTo(minX, y + h + 3);
+        ctx.stroke();
+
+        // Max Line
+        ctx.beginPath();
+        ctx.moveTo(maxX, y - 3);
+        ctx.lineTo(maxX, y + h + 3);
+        ctx.stroke();
+
+        // Highlight the "Last Hit" zone background slightly
+        ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+        ctx.fillRect(minX, y, maxX - minX, h);
+    }
+
+    checkHit(mx, my) {
+        if (this.dead) return false;
+        
+        const dist = Math.hypot(mx - this.x, my - this.y);
+        if (dist <= this.r) {
+            // Clicked this minion
+            if (this.hp >= IDEAL_MIN && this.hp <= IDEAL_MAX) {
+                return "HIT";
+            } else if (this.hp > IDEAL_MAX) {
+                return "EARLY"; // Clicked too early
+            }
+        }
+        return "MISS"; // Didn't click this minion
+    }
+}
+
+// ================= UTILS =================
+function rand(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+// ================= GAME LOGIC =================
+function startGame() {
+    state.score = 0;
+    state.level = 1;
+    state.particles = [];
+    state.minions = [];
+    
+    document.getElementById('start-screen').classList.remove('active');
+    document.getElementById('game-over-screen').classList.remove('active');
+    
+    spawnNewMinions();
+    
+    state.isPlaying = true;
+    state.lastTime = performance.now();
+    requestAnimationFrame(update);
+}
+
+function spawnNewMinions() {
+    const TARGET_COUNT = 3;
+    let attempts = 0;
+    
+    // Fill up to TARGET_COUNT
+    while(state.minions.length < TARGET_COUNT && attempts < 50) {
+        attempts++;
+        let m = new Minion();
+        
+        // Check overlap
+        let overlapping = false;
+        for(let other of state.minions) {
+            let d = Math.hypot(m.x - other.x, m.y - other.y);
+            if (d < m.r * 2 + 20) overlapping = true;
+        }
+        
+        if (!overlapping) {
+            state.minions.push(m);
+        }
+    }
+    
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('score-display').innerText = `SCORE: ${state.score} | LEVEL: ${state.level}`;
+}
+
+function gameOver() {
+    state.isPlaying = false;
+    document.getElementById('final-score').innerText = `Final Score: ${state.score}`;
+    document.getElementById('game-over-screen').classList.add('active');
+}
+
+function createParticles(x, y, color) {
+    for (let i = 0; i < 20; i++) {
+        state.particles.push({
+            x: x,
+            y: y,
+            vx: rand(-8, 8),
+            vy: rand(-8, 8),
+            life: 1.0,
+            color: color
+        });
+    }
+}
+
+// ================= DRAWING =================
+function drawParticles() {
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+        let p = state.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.03;
+        
+        if (p.life <= 0) {
+            state.particles.splice(i, 1);
+            continue;
+        }
+        
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function update(time) {
+    const delta = (time - state.lastTime) / 1000;
+    state.lastTime = time;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw Nice Radial Background (Restored)
+    let grd = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 100, canvas.width/2, canvas.height/2, 1000);
+    grd.addColorStop(0, "#2a2a2a");
+    grd.addColorStop(1, "#000000");
+    ctx.fillStyle = grd;
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+    if (state.isPlaying) {
+        // Update Minions & Remove Dead
+        for (let i = state.minions.length - 1; i >= 0; i--) {
+            let m = state.minions[i];
+            m.update(delta);
+            
+            if (m.dead) {
+                state.minions.splice(i, 1);
+            }
+        }
+
+        // Maintain constant minion count
+        if (state.isPlaying) {
+            spawnNewMinions();
+        }
+    }
+
+    // Draw Minions
+    for (let m of state.minions) {
+        m.draw(ctx);
+    }
+
+    drawParticles();
+
+    if (state.isPlaying) {
+        requestAnimationFrame(update);
+    } else {
+        // Continue animation loop for particles even if game over
+         requestAnimationFrame(update);
+    }
+}
+
+// ================= INPUT =================
+canvas.addEventListener("mousedown", (e) => {
+    if (!state.isPlaying) return;
+    if (e.button !== 2) return; // Only Right Click
+
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    let hitSomething = false;
+
+    // Check all minions
+    for (let m of state.minions) {
+        const result = m.checkHit(mx, my);
+        
+        if (result === "HIT") {
+            // Success
+            m.dead = true;
+            state.score += 10 + (state.level * 2);
+            state.level++; 
+            
+            createParticles(m.x, m.y, "#00ff88"); // Green/Success particles
+            updateUI();
+            hitSomething = true;
+            break; // Only hit one at a time
+        } else if (result === "EARLY") {
+            // Fail
+            createParticles(m.x, m.y, "#ff5555");
+            gameOver();
+            hitSomething = true;
+            break;
+        }
+    }
+});
+</script>
+
+</body>
+</html>
